@@ -34,10 +34,10 @@ fun loadFontFamily(ctx: Context): FontFamily {
         val names = ctx.assets.list("fonts")?.toSet() ?: emptySet()
         val fonts = mutableListOf<Font>()
         if ("Vazirmatn-Regular.ttf" in names) {
-            fonts += Font("fonts/Vazirmatn-Regular.ttf", ctx.assets, FontWeight.Normal)
+            fonts += Font(ctx.assets, "fonts/Vazirmatn-Regular.ttf", FontWeight.Normal)
         }
         if ("Vazirmatn-Bold.ttf" in names) {
-            fonts += Font("fonts/Vazirmatn-Bold.ttf", ctx.assets, FontWeight.Bold)
+            fonts += Font(ctx.assets, "fonts/Vazirmatn-Bold.ttf", FontWeight.Bold)
         }
         if (fonts.isEmpty()) FontFamily.Default else FontFamily(fonts)
     } catch (e: Exception) {

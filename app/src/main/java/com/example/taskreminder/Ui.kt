@@ -139,6 +139,21 @@ fun repeatLabel(t: Task): String = when (t.repeat) {
     Repeat.MONTHLY -> "هر ماه، روز ${fa(t.monthDay)}، ساعت ${timeText(t.hour, t.minute)}"
 }
 
+
+/** نسخهٔ نصب‌شدهٔ اپ (از versionName در Gradle) */
+@Composable
+fun appVersionText(): String {
+    val ctx = LocalContext.current
+    return remember {
+        try {
+            val v = ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: ""
+            if (v.isBlank()) "" else "نسخه " + fa(v)
+        } catch (e: Exception) {
+            ""
+        }
+    }
+}
+
 // ---------- مجوز نوتیفیکیشن ----------
 
 @Composable
@@ -154,125 +169,6 @@ fun AskNotificationPermission() {
 }
 
 // ---------- صفحهٔ اصلی ----------
-
-@Composable
-fun TaskApp(
-    tasks: List<Task>,
-    onUpsert: (Task) -> Unit,
-    onToggle: (Task) -> Unit,
-    onDelete: (Task) -> Unit
-) {
-    var editing by remember { mutableStateOf<Task?>(null) }
-    var showEditor by remember { mutableStateOf(false) }
-    var deleting by remember { mutableStateOf<Task?>(null) }
-    var filter by remember { mutableStateOf<Repeat?>(null) }
-
-    val today = LocalDate.now()
-    val todayCount = tasks.count {
-        !it.done && Instant.ofEpochMilli(it.dueAt).atZone(ZoneId.systemDefault()).toLocalDate() == today
-    }
-    val repeatingCount = tasks.count { it.repeat != Repeat.ONCE && !it.done }
-    val shown = tasks
-        .filter { filter == null || it.repeat == filter }
-        .sortedWith(compareBy<Task>({ it.done }, { it.dueAt }))
-
-    Scaffold(
-        containerColor = Neon.bg,
-        floatingActionButton = {
-            GradientButton("کار جدید", icon = Icons.Rounded.Add) { editing = null; showEditor = true }
-        },
-        floatingActionButtonPosition = androidx.compose.material3.FabPosition.Center
-    ) { pad ->
-        LazyColumn(
-            Modifier.padding(pad).fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            item {
-                Header(total = tasks.size, today = todayCount, repeating = repeatingCount, date = today)
-            }
-            item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    NeonChip("همه", filter == null, Neon.amber, Modifier.weight(1f)) { filter = null }
-                    Repeat.values().forEach { r ->
-                        NeonChip(r.title(), filter == r, r.neonColor(), Modifier.weight(1f)) {
-                            filter = if (filter == r) null else r
-                        }
-                    }
-                }
-            }
-            if (shown.isEmpty()) {
-                item { EmptyState() }
-            } else {
-                items(shown, key = { it.id }) { t ->
-                    TaskCard(
-                        t = t,
-                        onEdit = { editing = t; showEditor = true },
-                        onToggle = { onToggle(t) },
-                        onDelete = { deleting = t }
-                    )
-                }
-            }
-            item { Spacer(Modifier.height(96.dp)) }
-        }
-    }
-
-    if (showEditor) {
-        TaskEditor(
-            initial = editing,
-            onDismiss = { showEditor = false },
-            onSave = { onUpsert(it); showEditor = false }
-        )
-    }
-
-    deleting?.let { t ->
-        NeonDialog(
-            title = "حذف کار",
-            confirmText = "حذف",
-            onDismiss = { deleting = null },
-            onConfirm = { onDelete(t); deleting = null }
-        ) {
-            T("«${t.title}» حذف شود؟", align = TextAlign.Center, color = Neon.muted)
-        }
-    }
-}
-
-@Composable
-fun Header(total: Int, today: Int, repeating: Int, date: LocalDate) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                "یادآور کارها",
-                style = MaterialTheme.typography.headlineMedium.copy(
-                    brush = Brush.horizontalGradient(listOf(Neon.cyan, Neon.magenta)),
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                )
-            )
-            Spacer(Modifier.height(2.dp))
-            T(
-                "${Jalali.weekdayName(date.dayOfWeek)} ${dateText(Jalali.fromLocalDate(date))}",
-                size = 13.sp, color = Neon.muted
-            )
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatPill(fa(total), "کل", Neon.cyan)
-                StatPill(fa(today), "امروز", Neon.amber)
-                StatPill(fa(repeating), "تکراری", Neon.lime)
-            }
-        }
-        Box(
-            Modifier
-                .size(132.dp)
-                .background(
-                    Brush.radialGradient(listOf(Neon.cyan.copy(alpha = 0.28f), Color.Transparent)),
-                    CircleShape
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Image(painterResource(R.drawable.hero_clipboard), contentDescription = null, modifier = Modifier.size(108.dp))
-        }
-    }
-}
 
 @Composable
 fun StatPill(value: String, label: String, color: Color) {
@@ -301,97 +197,6 @@ fun EmptyState() {
         Spacer(Modifier.height(8.dp))
         T("هنوز کاری ثبت نشده", size = 17.sp, bold = true)
         T("با دکمهٔ «کار جدید» شروع کن", size = 13.sp, color = Neon.muted)
-    }
-}
-
-@Composable
-fun TaskCard(t: Task, onEdit: () -> Unit, onToggle: () -> Unit, onDelete: () -> Unit) {
-    val base = t.repeat.neonColor()
-    val color = if (t.done) Neon.muted else base
-    val overdue = t.repeat == Repeat.ONCE && !t.done && System.currentTimeMillis() > t.dueAt
-    val shape = RoundedCornerShape(22.dp)
-
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .neonGlow(color.copy(alpha = if (t.done) 0.4f else 1f), 22.dp, 7.dp)
-            .clip(shape)
-            .background(Brush.linearGradient(listOf(Neon.surface2, Neon.surface)))
-            .border(1.dp, Brush.linearGradient(listOf(color.copy(alpha = 0.9f), color.copy(alpha = 0.15f))), shape)
-            .clickable(onClick = onEdit)
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        NeonIcon(t.repeat.neonIcon(), color)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            T(
-                t.title, size = 16.sp, bold = true,
-                color = if (t.done) Neon.muted else Neon.text,
-                decoration = if (t.done) TextDecoration.LineThrough else null
-            )
-            T(repeatLabel(t), size = 12.sp, color = Neon.muted)
-            Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Rounded.Schedule, null,
-                    tint = if (overdue) Neon.red else color, modifier = Modifier.size(15.dp)
-                )
-                Spacer(Modifier.width(5.dp))
-                T(
-                    when {
-                        t.repeat != Repeat.ONCE && t.done -> "تکرارها به پایان رسید"
-                        t.done -> "انجام شد"
-                        overdue -> "عقب‌افتاده: " + dueLabel(t.dueAt)
-                        t.repeat == Repeat.ONCE -> dueLabel(t.dueAt)
-                        else -> "نوبت بعد: " + dueLabel(t.dueAt)
-                    },
-                    size = 12.sp, color = if (overdue) Neon.red else color
-                )
-            }
-            if (t.repeat != Repeat.ONCE) {
-                Spacer(Modifier.height(8.dp))
-                RepeatProgress(t, color)
-            }
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            if (t.repeat == Repeat.ONCE) {
-                IconButton(onClick = onToggle) {
-                    Icon(
-                        if (t.done) Icons.Rounded.TaskAlt else Icons.Rounded.RadioButtonUnchecked,
-                        contentDescription = "انجام شد",
-                        tint = if (t.done) Neon.lime else Neon.muted,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-            }
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Rounded.DeleteOutline, "حذف", tint = Neon.red.copy(alpha = 0.85f), modifier = Modifier.size(24.dp))
-            }
-        }
-    }
-}
-
-@Composable
-fun RepeatProgress(t: Task, color: Color) {
-    if (t.maxCount == 0) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.AllInclusive, null, tint = color, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(5.dp))
-            T("تکرار نامحدود · ${fa(t.firedCount)} بار انجام شده", size = 11.sp, color = Neon.muted)
-        }
-    } else {
-        val p = (t.firedCount.toFloat() / t.maxCount).coerceIn(0f, 1f)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            LinearProgressIndicator(
-                progress = { p },
-                modifier = Modifier.weight(1f).height(5.dp).clip(RoundedCornerShape(3.dp)),
-                color = color,
-                trackColor = color.copy(alpha = 0.15f)
-            )
-            Spacer(Modifier.width(8.dp))
-            T("${fa(t.firedCount)} از ${fa(t.maxCount)}", size = 11.sp, color = Neon.muted)
-        }
     }
 }
 
@@ -440,25 +245,6 @@ fun NeonTile(
 }
 
 @Composable
-fun TypeOption(r: Repeat, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    val c = r.neonColor()
-    val shape = RoundedCornerShape(18.dp)
-    Column(
-        modifier
-            .clip(shape)
-            .background(if (selected) c.copy(alpha = 0.14f) else Neon.surface)
-            .border(1.dp, if (selected) c else Neon.muted.copy(alpha = 0.25f), shape)
-            .clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        NeonIcon(r.neonIcon(), if (selected) c else Neon.muted, size = 40.dp, iconSize = 22.dp)
-        Spacer(Modifier.height(6.dp))
-        T(r.title(), size = 13.sp, color = if (selected) c else Neon.muted, bold = selected)
-    }
-}
-
-@Composable
 fun ModeOption(text: String, icon: ImageVector, selected: Boolean, color: Color, modifier: Modifier, onClick: () -> Unit) {
     val shape = RoundedCornerShape(16.dp)
     Row(
@@ -489,163 +275,6 @@ fun StepButton(icon: ImageVector, color: Color, onClick: () -> Unit) {
         contentAlignment = Alignment.Center
     ) {
         Icon(icon, null, tint = color)
-    }
-}
-
-@Composable
-fun TaskEditor(initial: Task?, onDismiss: () -> Unit, onSave: (Task) -> Unit) {
-    val today = remember { Jalali.fromLocalDate(LocalDate.now()) }
-    var title by remember { mutableStateOf(initial?.title ?: "") }
-    var repeat by remember { mutableStateOf(initial?.repeat ?: Repeat.ONCE) }
-    var hour by remember { mutableStateOf(initial?.hour ?: 9) }
-    var minute by remember { mutableStateOf(initial?.minute ?: 0) }
-    var jDate by remember {
-        mutableStateOf(if (initial != null) Jalali.fromEpochDay(initial.startDate) else today)
-    }
-    var unlimited by remember { mutableStateOf((initial?.maxCount ?: 0) == 0) }
-    var countText by remember {
-        mutableStateOf(if ((initial?.maxCount ?: 0) > 0) initial!!.maxCount.toString() else "10")
-    }
-    var picker by remember { mutableStateOf(0) } // 0 = هیچ، 1 = تاریخ، 2 = ساعت
-
-    val color = repeat.neonColor()
-    val count = (countText.toIntOrNull() ?: 1).coerceAtLeast(1)
-
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().background(Neon.bg)) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                T(if (initial == null) "کار جدید" else "ویرایش کار", size = 20.sp, bold = true, modifier = Modifier.weight(1f).padding(start = 8.dp))
-                IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, "بستن", tint = Neon.muted) }
-            }
-            Column(
-                Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { T("عنوان کار", size = 13.sp, color = Neon.muted) },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = Neon.text),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = color,
-                        unfocusedBorderColor = Neon.muted.copy(alpha = 0.4f),
-                        cursorColor = color,
-                        focusedTextColor = Neon.text,
-                        unfocusedTextColor = Neon.text
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                SectionLabel("نوع تکرار")
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Repeat.values().forEach { r ->
-                        TypeOption(r, repeat == r, Modifier.weight(1f)) { repeat = r }
-                    }
-                }
-
-                SectionLabel(if (repeat == Repeat.ONCE) "تاریخ" else "تاریخ شروع")
-                NeonTile(
-                    icon = Icons.Rounded.CalendarMonth,
-                    color = color,
-                    label = "برای تغییر لمس کن",
-                    value = fullDateText(jDate),
-                    hint = if (repeat == Repeat.MONTHLY)
-                        "هر ماه روز ${fa(jDate.third)} (در ماه‌های کوتاه‌تر، آخرین روز ماه)" else null
-                ) { picker = 1 }
-
-                SectionLabel("ساعت")
-                NeonTile(
-                    icon = Icons.Rounded.Schedule,
-                    color = color,
-                    label = "برای تغییر لمس کن",
-                    value = timeText(hour, minute)
-                ) { picker = 2 }
-
-                if (repeat != Repeat.ONCE) {
-                    SectionLabel("تعداد تکرار")
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        ModeOption("نامحدود", Icons.Rounded.AllInclusive, unlimited, color, Modifier.weight(1f)) { unlimited = true }
-                        ModeOption("تعداد مشخص", Icons.Rounded.RepeatIcon, !unlimited, color, Modifier.weight(1f)) { unlimited = false }
-                    }
-                    if (!unlimited) {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            StepButton(Icons.Rounded.Add, color) { countText = (count + 1).coerceAtMost(9999).toString() }
-                            OutlinedTextField(
-                                value = countText,
-                                onValueChange = { s -> countText = toLatin(s).filter { it.isDigit() }.take(4) },
-                                singleLine = true,
-                                visualTransformation = PersianDigits,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                textStyle = MaterialTheme.typography.titleLarge.copy(
-                                    color = Neon.text, textAlign = TextAlign.Center
-                                ),
-                                shape = RoundedCornerShape(16.dp),
-                                suffix = { T("بار", size = 13.sp, color = Neon.muted) },
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = color,
-                                    unfocusedBorderColor = color.copy(alpha = 0.5f),
-                                    cursorColor = color
-                                ),
-                                modifier = Modifier.weight(1f)
-                            )
-                            StepButton(Icons.Rounded.Remove, color) { countText = (count - 1).coerceAtLeast(1).toString() }
-                        }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(5, 10, 30, 60, 100).forEach { n ->
-                                NeonChip(fa(n), count == n, color, Modifier.weight(1f)) { countText = n.toString() }
-                            }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-            }
-            GradientButton(
-                "ذخیره",
-                Modifier.fillMaxWidth().padding(16.dp),
-                enabled = title.isNotBlank()
-            ) {
-                val g = Jalali.toLocalDate(jDate.first, jDate.second, jDate.third)
-                val max = if (repeat == Repeat.ONCE || unlimited) 0 else count
-                val fired = if (initial != null && initial.repeat == repeat) initial.firedCount else 0
-                val base = Task(
-                    id = initial?.id ?: (System.nanoTime() and 0x7fffffff).toInt(),
-                    title = title.trim(),
-                    repeat = repeat,
-                    hour = hour,
-                    minute = minute,
-                    monthDay = jDate.third,
-                    startDate = g.toEpochDay(),
-                    dueAt = 0L,
-                    done = max > 0 && repeat != Repeat.ONCE && fired >= max,
-                    maxCount = max,
-                    firedCount = fired
-                )
-                onSave(base.copy(dueAt = Recurrence.firstDue(base, System.currentTimeMillis())))
-            }
-        }
-    }
-
-    if (picker == 1) {
-        JalaliDateDialog(initial = jDate, todayYear = today.first, onDismiss = { picker = 0 }) {
-            jDate = it
-            picker = 0
-        }
-    }
-    if (picker == 2) {
-        TimeDialog(h = hour, m = minute, onDismiss = { picker = 0 }) { h, m ->
-            hour = h
-            minute = m
-            picker = 0
-        }
     }
 }
 
