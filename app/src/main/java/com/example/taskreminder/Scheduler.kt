@@ -52,7 +52,7 @@ object Scheduler {
     }
 
     fun rescheduleAll(ctx: Context) {
-        TaskStore(ctx).load().forEach { schedule(ctx, it) }
+        TaskStore(ctx).loadSynced().forEach { schedule(ctx, it) }
     }
 
     @SuppressLint("MissingPermission")
@@ -85,16 +85,29 @@ class AlarmReceiver : BroadcastReceiver() {
         val store = TaskStore(ctx)
         val tasks = store.load()
         val t = tasks.find { it.id == id } ?: return
+        val now = System.currentTimeMillis()
         when (intent.action) {
             Scheduler.ACTION_FIRE -> {
+                if (t.done) return
+                if (t.repeat == Repeat.ONCE) {
+                    Scheduler.notify(ctx, t)
+                    return
+                }
+                // آلارم قدیمی (مثلاً بعد از ویرایش) نباید شمارنده را بالا ببرد
+                if (t.dueAt > now + 60_000L) {
+                    Scheduler.schedule(ctx, t)
+                    return
+                }
                 Scheduler.notify(ctx, t)
-                Scheduler.schedule(ctx, t) // آلارم وقوع بعدی (برای کارهای تکرارشونده)
+                val n = Recurrence.catchUp(Recurrence.afterFire(t, now), now)
+                store.save(tasks.map { if (it.id == id) n else it })
+                Scheduler.schedule(ctx, n)
             }
             Scheduler.ACTION_DONE -> {
-                val n = Recurrence.afterDone(t, System.currentTimeMillis())
-                store.save(tasks.map { if (it.id == id) n else it })
                 NotificationManagerCompat.from(ctx).cancel(id)
-                Scheduler.schedule(ctx, n)
+                if (t.repeat == Repeat.ONCE) {
+                    store.save(tasks.map { if (it.id == id) it.copy(done = true) else it })
+                }
             }
         }
     }

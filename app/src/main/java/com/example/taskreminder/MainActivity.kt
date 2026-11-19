@@ -3,13 +3,9 @@ package com.example.taskreminder
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.unit.LayoutDirection
 
 class MainActivity : ComponentActivity() {
 
@@ -20,28 +16,26 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         store = TaskStore(this)
         Scheduler.ensureChannel(this)
-        tasks = store.load()
+        tasks = store.loadSynced()
         Scheduler.rescheduleAll(this)
 
         setContent {
-            MaterialTheme {
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                    AskNotificationPermission()
-                    TaskApp(
-                        tasks = tasks,
-                        onUpsert = ::upsert,
-                        onToggle = ::toggle,
-                        onDelete = ::delete
-                    )
-                }
+            AppTheme {
+                AskNotificationPermission()
+                TaskApp(
+                    tasks = tasks,
+                    onUpsert = ::upsert,
+                    onToggle = ::toggle,
+                    onDelete = ::delete
+                )
             }
         }
     }
 
     override fun onResume() {
         super.onResume()
-        // ممکن است کاربر از روی نوتیفیکیشن «انجام شد» را زده باشد
-        tasks = store.load()
+        // اعلان‌ها ممکن است وقتی اپ بسته بوده شمارنده‌ها را جلو برده باشند
+        tasks = store.loadSynced()
     }
 
     private fun commit(list: List<Task>) {
@@ -54,14 +48,15 @@ class MainActivity : ComponentActivity() {
         val i = l.indexOfFirst { it.id == t.id }
         if (i >= 0) l[i] = t else l.add(t)
         commit(l)
+        Scheduler.cancel(this, t.id)
         Scheduler.schedule(this, t)
     }
 
+    /** فقط برای کارهای یک‌بار */
     private fun toggle(t: Task) {
-        val n = if (t.repeat == Repeat.ONCE && t.done) t.copy(done = false)
-        else Recurrence.afterDone(t, System.currentTimeMillis())
+        val n = t.copy(done = !t.done)
         commit(tasks.map { if (it.id == t.id) n else it })
-        Scheduler.cancel(this, t.id) // نوتیفیکیشن باز را هم می‌بندد
+        Scheduler.cancel(this, t.id)
         Scheduler.schedule(this, n)
     }
 
