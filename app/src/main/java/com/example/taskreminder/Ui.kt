@@ -188,15 +188,18 @@ fun StatPill(value: String, label: String, color: Color) {
 }
 
 @Composable
-fun EmptyState() {
+fun EmptyState(
+    title: String = "هنوز کاری ثبت نشده",
+    hint: String = "با دکمهٔ «کار جدید» شروع کن"
+) {
     Column(
         Modifier.fillMaxWidth().padding(top = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Image(painterResource(R.drawable.hero_clipboard), contentDescription = null, modifier = Modifier.size(150.dp))
         Spacer(Modifier.height(8.dp))
-        T("هنوز کاری ثبت نشده", size = 17.sp, bold = true)
-        T("با دکمهٔ «کار جدید» شروع کن", size = 13.sp, color = Neon.muted)
+        T(title, size = 17.sp, bold = true)
+        T(hint, size = 13.sp, color = Neon.muted)
     }
 }
 

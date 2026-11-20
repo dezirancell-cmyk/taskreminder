@@ -14,8 +14,8 @@ android {
         applicationId = "com.example.taskreminder"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "2.3"
+        versionCode = 9
+        versionName = "2.6.1"
     }
 
     buildTypes {

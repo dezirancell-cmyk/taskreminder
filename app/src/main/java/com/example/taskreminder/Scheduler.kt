@@ -58,6 +58,7 @@ object Scheduler {
         make(CH_S, "هشدار با صدا", true, false)
         make(CH_V, "هشدار با لرزش", false, true)
         make(CH_Q, "اعلان بی‌صدا", false, false)
+        HabitAlarms.ensureChannel(ctx)
     }
 
     private fun pi(ctx: Context, id: Long, action: String): PendingIntent {

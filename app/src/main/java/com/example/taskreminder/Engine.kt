@@ -130,4 +130,60 @@ object Engine {
         val pct = if (total == 0) 0 else done * 100 / total
         return DayProgress(total, done, total - done, overdue, pct)
     }
+
+    /** تاریخ‌های پیش‌بینی‌شدهٔ یک الگو (برای تقویم)؛ [lastDue] آخرین سررسید ساخته‌شده است */
+    fun projection(t: TemplateEntity, lastDue: Long, from: LocalDate, to: LocalDate): List<LocalDate> {
+        if (t.paused) return emptyList()
+        return when (t.kind) {
+            Kind.WEEKLY -> weeklyDates(t, from, to)
+            Kind.DUE -> {
+                if (t.unit == Every.NONE) return emptyList()
+                val out = mutableListOf<LocalDate>()
+                var cur = LocalDate.ofEpochDay(lastDue)
+                var n = 0
+                while (n < 400) {
+                    val nx = nextDue(t, cur) ?: break
+                    if (nx.isAfter(to)) break
+                    if (!nx.isBefore(from)) out.add(nx)
+                    cur = nx
+                    n++
+                }
+                out
+            }
+            else -> emptyList()
+        }
+    }
+
+    /**
+     * نوبت‌های واقعی + پیش‌بینی نوبت‌های آینده (id = -۱، فقط نمایشی) به تفکیک روز.
+     * نوبت‌های لغوشده نشان داده نمی‌شوند.
+     */
+    fun calendarEntries(
+        items: List<PlanItem>,
+        templates: List<TemplateEntity>,
+        from: LocalDate,
+        to: LocalDate,
+        today: LocalDate
+    ): Map<Long, List<PlanItem>> {
+        val f = from.toEpochDay()
+        val tt = to.toEpochDay()
+        val map = mutableMapOf<Long, MutableList<PlanItem>>()
+        items.filter { it.inst.dueDate in f..tt && it.inst.status != Status.CANCELED }
+            .forEach { map.getOrPut(it.inst.dueDate) { mutableListOf() }.add(it) }
+        val byTemplate = items.groupBy { it.tpl.id }
+        for (t in templates) {
+            if (t.paused) continue
+            val real = byTemplate[t.id].orEmpty()
+            val have = real.map { it.inst.dueDate }.toSet()
+            val last = real.maxOfOrNull { it.inst.dueDate } ?: t.startDate
+            val start = later(from, today)
+            projection(t, last, start, to)
+                .filter { it.toEpochDay() !in have }
+                .forEach { d ->
+                    val virtual = newInstance(t, d).copy(id = -1L)
+                    map.getOrPut(d.toEpochDay()) { mutableListOf() }.add(PlanItem(virtual, t))
+                }
+        }
+        return map
+    }
 }

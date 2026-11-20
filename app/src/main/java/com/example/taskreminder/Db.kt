@@ -1,6 +1,7 @@
 package com.example.taskreminder
 
 import android.content.Context
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -220,14 +221,313 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
+/** یک قلم از لیست خرید. قیمت‌ها قیمت هر واحد (به کوچک‌ترین واحد پولی)؛ ۰ یعنی ثبت نشده. */
+@Entity(tableName = "shopping")
+data class ShoppingEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val category: String,
+    val qty: Int,
+    val estPrice: Long,
+    val actualPrice: Long,
+    /** epoch-day برنامه‌ریزی یا خرید */
+    val date: Long,
+    val bought: Boolean,
+    val boughtAt: Long,
+    val note: String,
+    val createdAt: Long,
+    /** شناسهٔ هزینهٔ مالیِ ساخته‌شده از این قلم؛ ۰ یعنی هنوز ثبت نشده */
+    @ColumnInfo(defaultValue = "0") val expenseId: Long = 0
+)
+
+data class NameCat(val name: String, val category: String)
+
+@Dao
+interface ShopDao {
+    @Query("SELECT * FROM shopping WHERE bought = 0 OR date >= :from ORDER BY bought, date, id")
+    fun observeAll(from: Long): Flow<List<ShoppingEntity>>
+
+    @Query("SELECT name, category FROM shopping GROUP BY name ORDER BY COUNT(*) DESC, MAX(createdAt) DESC LIMIT 60")
+    fun observeNames(): Flow<List<NameCat>>
+
+    @Insert
+    suspend fun insert(e: ShoppingEntity): Long
+
+    @Insert
+    suspend fun insertAll(list: List<ShoppingEntity>)
+
+    @Update
+    suspend fun update(e: ShoppingEntity)
+
+    @Query("DELETE FROM shopping WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("UPDATE shopping SET expenseId = 0 WHERE expenseId = :txId")
+    suspend fun unlinkExpense(txId: Long)
+}
+
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `shopping` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`name` TEXT NOT NULL, `category` TEXT NOT NULL, `qty` INTEGER NOT NULL, " +
+                "`estPrice` INTEGER NOT NULL, `actualPrice` INTEGER NOT NULL, `date` INTEGER NOT NULL, " +
+                "`bought` INTEGER NOT NULL, `boughtAt` INTEGER NOT NULL, `note` TEXT NOT NULL, " +
+                "`createdAt` INTEGER NOT NULL)"
+        )
+    }
+}
+
+// ---------- مالی ----------
+
+@Entity(tableName = "accounts")
+data class AccountEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    /** BANK | CASH */
+    val type: String,
+    val initial: Long,
+    val createdAt: Long
+)
+
+/** تراکنش: INCOME | EXPENSE | TRANSFER (انتقال نه درآمد است نه هزینه) */
+@Entity(tableName = "finance_tx")
+data class TxEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val type: String,
+    val amount: Long,
+    val category: String,
+    val accountId: Long,
+    /** مقصد انتقال؛ ۰ برای درآمد/هزینه */
+    val toAccountId: Long,
+    val date: Long,
+    val note: String,
+    /** حساب دیگران (مشتری) مرتبط؛ ۰ یعنی ندارد */
+    val partyId: Long,
+    /** فاکتور مرتبط (دریافتی فاکتور)؛ ۰ یعنی ندارد */
+    val invoiceId: Long,
+    val createdAt: Long
+)
+
+/** حساب دیگران: مشتری/طرف حساب با مانده (فاکتورها − دریافتی‌ها) */
+@Entity(tableName = "parties")
+data class PartyEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val phone: String,
+    val note: String,
+    val createdAt: Long
+)
+
+@Entity(tableName = "products")
+data class ProductEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val unit: String,
+    val price: Long,
+    val createdAt: Long
+)
+
+@Entity(tableName = "invoices")
+data class InvoiceEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val number: Int,
+    val partyId: Long,
+    val date: Long,
+    val note: String,
+    val createdAt: Long
+)
+
+/** ردیف فاکتور؛ نام و قیمت در لحظهٔ صدور ذخیره می‌شود (تغییر محصول فاکتور قدیمی را عوض نمی‌کند) */
+@Entity(tableName = "invoice_lines")
+data class InvoiceLineEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val invoiceId: Long,
+    val name: String,
+    val unit: String,
+    val qty: Int,
+    val unitPrice: Long
+)
+
+@Entity(tableName = "budgets")
+data class BudgetEntity(
+    @PrimaryKey val category: String,
+    val amount: Long
+)
+
+@Dao
+interface FinDao {
+    @Query("SELECT * FROM accounts ORDER BY id")
+    fun observeAccounts(): Flow<List<AccountEntity>>
+
+    @Query("SELECT * FROM finance_tx ORDER BY date DESC, id DESC")
+    fun observeTx(): Flow<List<TxEntity>>
+
+    @Query("SELECT * FROM parties ORDER BY name")
+    fun observeParties(): Flow<List<PartyEntity>>
+
+    @Query("SELECT * FROM products ORDER BY name")
+    fun observeProducts(): Flow<List<ProductEntity>>
+
+    @Query("SELECT * FROM invoices ORDER BY number DESC")
+    fun observeInvoices(): Flow<List<InvoiceEntity>>
+
+    @Query("SELECT * FROM invoice_lines")
+    fun observeLines(): Flow<List<InvoiceLineEntity>>
+
+    @Query("SELECT * FROM budgets")
+    fun observeBudgets(): Flow<List<BudgetEntity>>
+
+    @Query("SELECT COUNT(*) FROM accounts")
+    suspend fun accountCount(): Int
+
+    @Insert
+    suspend fun insertAccount(a: AccountEntity): Long
+
+    @Update
+    suspend fun updateAccount(a: AccountEntity)
+
+    @Query("DELETE FROM accounts WHERE id = :id")
+    suspend fun deleteAccount(id: Long)
+
+    @Query("SELECT COUNT(*) FROM finance_tx WHERE accountId = :id OR toAccountId = :id")
+    suspend fun txCountForAccount(id: Long): Int
+
+    @Insert
+    suspend fun insertTx(t: TxEntity): Long
+
+    @Update
+    suspend fun updateTx(t: TxEntity)
+
+    @Query("DELETE FROM finance_tx WHERE id = :id")
+    suspend fun deleteTx(id: Long)
+
+    @Insert
+    suspend fun insertParty(p: PartyEntity): Long
+
+    @Update
+    suspend fun updateParty(p: PartyEntity)
+
+    @Query("DELETE FROM parties WHERE id = :id")
+    suspend fun deleteParty(id: Long)
+
+    @Query("SELECT (SELECT COUNT(*) FROM invoices WHERE partyId = :id) + (SELECT COUNT(*) FROM finance_tx WHERE partyId = :id)")
+    suspend fun partyUsage(id: Long): Int
+
+    @Insert
+    suspend fun insertProduct(p: ProductEntity): Long
+
+    @Update
+    suspend fun updateProduct(p: ProductEntity)
+
+    @Query("DELETE FROM products WHERE id = :id")
+    suspend fun deleteProduct(id: Long)
+
+    @Insert
+    suspend fun insertInvoice(i: InvoiceEntity): Long
+
+    @Update
+    suspend fun updateInvoice(i: InvoiceEntity)
+
+    @Query("DELETE FROM invoices WHERE id = :id")
+    suspend fun deleteInvoice(id: Long)
+
+    @Query("SELECT MAX(number) FROM invoices")
+    suspend fun maxInvoiceNumber(): Int?
+
+    @Insert
+    suspend fun insertLines(list: List<InvoiceLineEntity>)
+
+    @Query("DELETE FROM invoice_lines WHERE invoiceId = :invoiceId")
+    suspend fun deleteLines(invoiceId: Long)
+
+    @Query("SELECT COUNT(*) FROM finance_tx WHERE invoiceId = :invoiceId")
+    suspend fun paymentCount(invoiceId: Long): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun setBudget(b: BudgetEntity)
+
+    @Query("DELETE FROM budgets WHERE category = :category")
+    suspend fun deleteBudget(category: String)
+}
+
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `shopping` ADD COLUMN `expenseId` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `accounts` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`name` TEXT NOT NULL, `type` TEXT NOT NULL, `initial` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL)"
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `finance_tx` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`type` TEXT NOT NULL, `amount` INTEGER NOT NULL, `category` TEXT NOT NULL, " +
+                "`accountId` INTEGER NOT NULL, `toAccountId` INTEGER NOT NULL, `date` INTEGER NOT NULL, " +
+                "`note` TEXT NOT NULL, `partyId` INTEGER NOT NULL, `invoiceId` INTEGER NOT NULL, " +
+                "`createdAt` INTEGER NOT NULL)"
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `parties` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`name` TEXT NOT NULL, `phone` TEXT NOT NULL, `note` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)"
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `products` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`name` TEXT NOT NULL, `unit` TEXT NOT NULL, `price` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL)"
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `invoices` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`number` INTEGER NOT NULL, `partyId` INTEGER NOT NULL, `date` INTEGER NOT NULL, " +
+                "`note` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)"
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `invoice_lines` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`invoiceId` INTEGER NOT NULL, `name` TEXT NOT NULL, `unit` TEXT NOT NULL, " +
+                "`qty` INTEGER NOT NULL, `unitPrice` INTEGER NOT NULL)"
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `budgets` (`category` TEXT NOT NULL, `amount` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`category`))"
+        )
+    }
+}
+
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `habits` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`title` TEXT NOT NULL, `icon` TEXT NOT NULL, `kind` TEXT NOT NULL, " +
+                "`weekMask` INTEGER NOT NULL, `target` INTEGER NOT NULL, `timeMin` INTEGER NOT NULL, " +
+                "`createdAt` INTEGER NOT NULL, `startDay` INTEGER NOT NULL)"
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `habit_logs` (`habitId` INTEGER NOT NULL, `day` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`habitId`, `day`))"
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `goals` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`title` TEXT NOT NULL, `kind` TEXT NOT NULL, `target` INTEGER NOT NULL, " +
+                "`current` INTEGER NOT NULL, `step` INTEGER NOT NULL, `unit` TEXT NOT NULL, " +
+                "`deadline` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `doneAt` INTEGER NOT NULL)"
+        )
+    }
+}
+
 @Database(
-    entities = [TaskEntity::class, TemplateEntity::class, InstanceEntity::class],
-    version = 2,
+    entities = [
+        TaskEntity::class, TemplateEntity::class, InstanceEntity::class, ShoppingEntity::class,
+        AccountEntity::class, TxEntity::class, PartyEntity::class, ProductEntity::class,
+        InvoiceEntity::class, InvoiceLineEntity::class, BudgetEntity::class,
+        HabitEntity::class, HabitLogEntity::class, GoalEntity::class
+    ],
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
     abstract fun planDao(): PlanDao
+    abstract fun shopDao(): ShopDao
+    abstract fun finDao(): FinDao
+    abstract fun habitDao(): HabitDao
 
     companion object {
         @Volatile private var inst: AppDatabase? = null
@@ -235,7 +535,7 @@ abstract class AppDatabase : RoomDatabase() {
         fun get(ctx: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(
                 ctx.applicationContext, AppDatabase::class.java, "taskreminder.db"
-            ).addMigrations(MIGRATION_1_2).build().also { inst = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build().also { inst = it }
         }
     }
 }

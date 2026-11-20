@@ -28,13 +28,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Alarm
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.AccountBalanceWallet
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Event
+import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.ShoppingCart
 import androidx.compose.material.icons.rounded.TaskAlt
 import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -93,18 +98,24 @@ fun categoryName(key: String): String = CATEGORIES.firstOrNull { it.first == key
 fun kindColor(kind: String): Color = when (kind) {
     Kind.DAY -> Neon.cyan
     Kind.WEEKLY -> Neon.lime
+    TxType.INCOME -> Neon.lime
+    TxType.EXPENSE -> Neon.red
     else -> Neon.amber
 }
 
 fun kindIcon(kind: String): ImageVector = when (kind) {
     Kind.DAY -> Icons.Rounded.WbSunny
     Kind.WEEKLY -> Icons.Rounded.CalendarMonth
+    TxType.INCOME -> Icons.Rounded.ArrowDownward
+    TxType.EXPENSE -> Icons.Rounded.ArrowUpward
     else -> Icons.Rounded.Alarm
 }
 
 fun kindTitle(kind: String): String = when (kind) {
     Kind.DAY -> "کار روزانه"
     Kind.WEEKLY -> "برنامهٔ هفتگی"
+    TxType.INCOME -> "ثبت درآمد"
+    TxType.EXPENSE -> "ثبت هزینه"
     else -> "سررسید با زنگ"
 }
 
@@ -138,7 +149,7 @@ fun scheduleSummary(t: TemplateEntity): String = when (t.kind) {
     }
 }
 
-private fun moneyText(v: Long): String = fa(String.format(Locale.US, "%,d", v))
+fun moneyText(v: Long): String = fa(String.format(Locale.US, "%,d", v))
 
 @Composable
 fun rememberNow(): Long {
@@ -158,6 +169,22 @@ private fun isOverdue(i: PlanItem, today: Long, now: Long): Boolean =
 
 // ---------- قاب اصلی ----------
 
+/** دکمهٔ گرد «+» برای کار جدید؛ در چیدمان راست‌به‌چپ سمت چپ صفحه می‌نشیند */
+@Composable
+fun RoundAddButton(onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(60.dp)
+            .neonGlow(Neon.cyan, 30.dp, 8.dp)
+            .clip(CircleShape)
+            .background(Brush.linearGradient(listOf(Neon.cyan, Neon.magenta)))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(Icons.Rounded.Add, contentDescription = "کار جدید", tint = Neon.bg, modifier = Modifier.size(32.dp))
+    }
+}
+
 @Composable
 fun TaskApp(vm: TaskViewModel) {
     val items by vm.items.collectAsState()
@@ -173,6 +200,16 @@ fun TaskApp(vm: TaskViewModel) {
     var editing by remember { mutableStateOf<TemplateEntity?>(null) }
     var deleting by remember { mutableStateOf<TemplateEntity?>(null) }
     var details by remember { mutableStateOf(false) }
+    var newDate by remember { mutableStateOf<LocalDate?>(null) }
+    var shopEditorOpen by remember { mutableStateOf(false) }
+    var shopEditing by remember { mutableStateOf<ShoppingEntity?>(null) }
+    var shopDelete by remember { mutableStateOf<ShoppingEntity?>(null) }
+    val shopping by vm.shopping.collectAsState()
+    val accounts by vm.accounts.collectAsState()
+    val currency by vm.currency.collectAsState()
+    var quickTx by remember { mutableStateOf<String?>(null) }
+    var convertItem by remember { mutableStateOf<ShoppingEntity?>(null) }
+    val names by vm.suggestions.collectAsState()
 
     val openTemplate: (TemplateEntity) -> Unit = { t ->
         editing = t
@@ -194,29 +231,60 @@ fun TaskApp(vm: TaskViewModel) {
                     selected = tab == 0,
                     onClick = { tab = 0 },
                     icon = { Icon(Icons.Rounded.WbSunny, null) },
-                    label = { T("امروز", size = 12.sp) },
+                    label = { T("امروز", size = 11.sp) },
+                    colors = navColors
+                )
+                NavigationBarItem(
+                    selected = tab == 2,
+                    onClick = { tab = 2 },
+                    icon = { Icon(Icons.Rounded.CalendarMonth, null) },
+                    label = { T("تقویم", size = 11.sp) },
+                    colors = navColors
+                )
+                NavigationBarItem(
+                    selected = tab == 3,
+                    onClick = { tab = 3 },
+                    icon = { Icon(Icons.Rounded.ShoppingCart, null) },
+                    label = { T("خریدها", size = 11.sp) },
+                    colors = navColors
+                )
+                NavigationBarItem(
+                    selected = tab == 4,
+                    onClick = { tab = 4 },
+                    icon = { Icon(Icons.Rounded.AccountBalanceWallet, null) },
+                    label = { T("مالی", size = 11.sp) },
+                    colors = navColors
+                )
+                NavigationBarItem(
+                    selected = tab == 5,
+                    onClick = { tab = 5 },
+                    icon = { Icon(Icons.Rounded.LocalFireDepartment, null) },
+                    label = { T("عادت‌ها", size = 11.sp) },
                     colors = navColors
                 )
                 NavigationBarItem(
                     selected = tab == 1,
                     onClick = { tab = 1 },
                     icon = { Icon(Icons.Rounded.TaskAlt, null) },
-                    label = { T("وظایف", size = 12.sp) },
+                    label = { T("وظایف", size = 11.sp) },
                     colors = navColors
                 )
             }
         },
         floatingActionButton = {
-            GradientButton("کار جدید", icon = Icons.Rounded.Add) {
-                editing = null
-                chooser = true
+            if (tab != 3 && tab != 4 && tab != 5) {
+                RoundAddButton {
+                    editing = null
+                    newDate = null
+                    chooser = true
+                }
             }
         },
-        floatingActionButtonPosition = FabPosition.Center
+        floatingActionButtonPosition = FabPosition.End
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
-            if (tab == 0) {
-                Dashboard(
+            when (tab) {
+                0 -> Dashboard(
                     items = items,
                     today = today,
                     now = now,
@@ -225,12 +293,42 @@ fun TaskApp(vm: TaskViewModel) {
                     onPostpone = { vm.postpone(it.inst.id) },
                     onDetails = { details = true }
                 )
-            } else {
-                TasksTab(
+                1 -> TasksTab(
                     templates = templates,
                     onOpen = openTemplate,
                     onDelete = { deleting = it },
                     onPause = { vm.togglePause(it.id) }
+                )
+                2 -> CalendarTab(
+                    items = items,
+                    templates = templates,
+                    shopping = shopping,
+                    today = today,
+                    now = now,
+                    onToggle = { vm.setDone(it.inst.id, it.inst.status != Status.DONE) },
+                    onOpen = openTemplate,
+                    onPostpone = { vm.postpone(it.inst.id) },
+                    onAddForDay = { d ->
+                        editing = null
+                        newDate = d
+                        chooser = true
+                    },
+                    onOpenShopping = { tab = 3 }
+                )
+                4 -> FinanceTab(vm, today)
+                5 -> HabitsTab(vm, today)
+                else -> ShoppingTab(
+                    list = shopping,
+                    names = names,
+                    today = today,
+                    onQuickAdd = { n, c -> vm.quickAddShopping(n, c) },
+                    onToggle = { vm.toggleBought(it) },
+                    onQty = { e, d -> vm.changeQty(e, d) },
+                    onOpen = { shopEditing = it; shopEditorOpen = true },
+                    onDelete = { shopDelete = it },
+                    onConvert = { convertItem = it },
+                    onNew = { shopEditing = null; shopEditorOpen = true },
+                    onRepeat = { l, shift -> vm.repeatShopping(l, shift) }
                 )
             }
         }
@@ -241,7 +339,7 @@ fun TaskApp(vm: TaskViewModel) {
             onPick = {
                 chooser = false
                 editing = null
-                editorKind = it
+                if (it == TxType.INCOME || it == TxType.EXPENSE) quickTx = it else editorKind = it
             },
             onDismiss = { chooser = false }
         )
@@ -251,13 +349,80 @@ fun TaskApp(vm: TaskViewModel) {
         PlanEditor(
             kind = k,
             initial = editing,
-            onDismiss = { editorKind = null; editing = null },
+            defaultDate = newDate,
+            onDismiss = { editorKind = null; editing = null; newDate = null },
             onSave = {
                 vm.save(it)
                 editorKind = null
                 editing = null
+                newDate = null
             }
         )
+    }
+
+    quickTx?.let { ty ->
+        TxEditor(
+            type = ty, initial = null, accounts = accounts,
+            defaultAccount = vm.lastAccount(), defaultCategory = vm.lastCategory(ty),
+            onDismiss = { quickTx = null },
+            onSave = {
+                vm.saveTx(it)
+                quickTx = null
+            }
+        )
+    }
+
+    convertItem?.let { e ->
+        var acc by remember(e.id) {
+            mutableStateOf(
+                vm.lastAccount().takeIf { id -> accounts.any { it.id == id } } ?: accounts.firstOrNull()?.id ?: 0L
+            )
+        }
+        val unitPrice = if (e.actualPrice > 0) e.actualPrice else e.estPrice
+        NeonDialog(
+            title = "ثبت به‌عنوان هزینه",
+            confirmText = "ثبت",
+            onDismiss = { convertItem = null },
+            onConfirm = {
+                if (acc != 0L) vm.convertShopping(e, acc)
+                convertItem = null
+            }
+        ) {
+            T(
+                "«${e.name}» · " + money(unitPrice * e.qty, currency) +
+                    (if (e.actualPrice > 0) " (قیمت واقعی)" else " (قیمت تخمینی)"),
+                align = TextAlign.Center, color = Neon.muted, size = 13.sp
+            )
+            Spacer(Modifier.height(8.dp))
+            AccountPicker(accounts, acc, Neon.red) { acc = it }
+        }
+    }
+
+    if (shopEditorOpen) {
+        ShopEditor(
+            initial = shopEditing,
+            defaultDate = LocalDate.ofEpochDay(today),
+            onDismiss = { shopEditorOpen = false; shopEditing = null },
+            onSave = {
+                if (it.id == 0L) vm.addShopping(it) else vm.updateShopping(it)
+                shopEditorOpen = false
+                shopEditing = null
+            }
+        )
+    }
+
+    shopDelete?.let { e ->
+        NeonDialog(
+            title = "حذف کالا",
+            confirmText = "حذف",
+            onDismiss = { shopDelete = null },
+            onConfirm = {
+                vm.deleteShopping(e.id)
+                shopDelete = null
+            }
+        ) {
+            T("«${e.name}» از لیست خرید حذف شود؟", align = TextAlign.Center, color = Neon.muted)
+        }
     }
 
     deleting?.let { t ->
@@ -484,7 +649,8 @@ fun PlanCard(
     now: Long,
     onToggle: () -> Unit,
     onOpen: () -> Unit,
-    onPostpone: (() -> Unit)?
+    onPostpone: (() -> Unit)?,
+    readOnly: Boolean = false
 ) {
     val t = item.tpl
     val i = item.inst
@@ -512,7 +678,11 @@ fun PlanCard(
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(onClick = onToggle) {
+        if (readOnly) {
+            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Schedule, null, tint = Neon.muted, modifier = Modifier.size(24.dp))
+            }
+        } else IconButton(onClick = onToggle) {
             Icon(
                 if (done) Icons.Rounded.TaskAlt else Icons.Rounded.RadioButtonUnchecked,
                 contentDescription = if (done) "برگرداندن" else "انجام شد",
@@ -650,6 +820,8 @@ fun TypeChooser(onPick: (String) -> Unit, onDismiss: () -> Unit) {
             ChooserRow(Kind.DAY, "یک روز مشخص، بدون نیاز به ساعت", onPick)
             ChooserRow(Kind.WEEKLY, "تکرار در روزهای هفته، مثل باشگاه و کلاس", onPick)
             ChooserRow(Kind.DUE, "اجاره، قسط و قبض با زنگ هشدار", onPick)
+            ChooserRow(TxType.INCOME, "درآمد جدید در یکی از حساب‌ها", onPick)
+            ChooserRow(TxType.EXPENSE, "هزینهٔ جدید با دسته‌بندی آماده", onPick)
             GhostButton("انصراف", Modifier.fillMaxWidth(), onDismiss)
         }
     }
@@ -681,7 +853,7 @@ private fun ChooserRow(kind: String, desc: String, onPick: (String) -> Unit) {
 // ---------- ویرایشگر (فیلدها بر اساس نوع) ----------
 
 @Composable
-private fun ChipGrid(
+fun ChipGrid(
     options: List<Pair<String, String>>,
     isSelected: (String) -> Boolean,
     color: Color,
@@ -699,7 +871,13 @@ private fun ChipGrid(
 }
 
 @Composable
-fun PlanEditor(kind: String, initial: TemplateEntity?, onDismiss: () -> Unit, onSave: (TemplateEntity) -> Unit) {
+fun PlanEditor(
+    kind: String,
+    initial: TemplateEntity?,
+    onDismiss: () -> Unit,
+    onSave: (TemplateEntity) -> Unit,
+    defaultDate: LocalDate? = null
+) {
     val todayJ = remember { Jalali.fromLocalDate(LocalDate.now()) }
     val color = kindColor(kind)
 
@@ -707,7 +885,13 @@ fun PlanEditor(kind: String, initial: TemplateEntity?, onDismiss: () -> Unit, on
     var category by remember { mutableStateOf(initial?.category ?: "personal") }
     var priority by remember { mutableStateOf(initial?.priority ?: 0) }
     var note by remember { mutableStateOf(initial?.note ?: "") }
-    var jDate by remember { mutableStateOf(if (initial != null) Jalali.fromEpochDay(initial.startDate) else todayJ) }
+    var jDate by remember {
+        mutableStateOf(
+            if (initial != null) Jalali.fromEpochDay(initial.startDate)
+            else if (defaultDate != null) Jalali.fromLocalDate(defaultDate)
+            else todayJ
+        )
+    }
     var hasEnd by remember { mutableStateOf((initial?.endDate ?: 0L) > 0L) }
     var jEnd by remember {
         mutableStateOf(if (initial != null && initial.endDate > 0L) Jalali.fromEpochDay(initial.endDate) else todayJ)
